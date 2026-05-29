@@ -2,14 +2,15 @@ import React, { useState, useRef } from 'react';
 import { PackageSearch, Trash2, LayoutGrid, Upload, FileText, AlertCircle, X, Download } from 'lucide-react';
 import { FixedSizeList } from 'react-window';
 import { useTranslation } from 'react-i18next';
-import { cn, parseExcelDate, parseLocalDate, getLocalDateString } from '../utils';
-import { UnissuedMaterial } from '../types';
+import { cn, parseExcelDate, parseLocalDate, getLocalDateString, DEFAULT_BUFFER_DELIVERY_OFFSETS } from '../utils';
+import { UnissuedMaterial, SystemSettings } from '../types';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx-js-style';
 import Papa from 'papaparse';
 
 interface UnissuedMaterialsProps {
   persistedData: UnissuedMaterial[];
+  settings?: SystemSettings;
   onDataChange: (data: UnissuedMaterial[]) => void;
   persistedShowList: boolean;
   onShowListChange: (show: boolean) => void;
@@ -17,6 +18,7 @@ interface UnissuedMaterialsProps {
 
 export default function UnissuedMaterials({
   persistedData,
+  settings,
   onDataChange,
   persistedShowList,
   onShowListChange
@@ -120,32 +122,8 @@ export default function UnissuedMaterials({
           const cleanDateStr = transitDelivery.replace(/\//g, '-');
           const parsed = parseLocalDate(cleanDateStr);
           if (parsed && !isNaN(parsed.getTime())) {
-              let daysToAdd = 15; // 默认顺延 15 天
-              if (property === '化学品') {
-                  daysToAdd = 10;
-              } else if (property === '五金件') {
-                  daysToAdd = 5;
-              } else if (['机加原材料', '钣金原材料'].includes(property)) {
-                  daysToAdd = 15;
-              } else {
-                  const dmDaysMap: Record<string, number> = {
-                      'ASY': 5,
-                      'DTL': 5,
-                      'AGS': 10,
-                      'POL': 15,
-                      'ALU': 20,
-                      'SST': 20,
-                      'CPP': 20,
-                      'NYL': 20,
-                      'FMT': 20,
-                      'HSS': 20,
-                      'MFC': 20,
-                      'MFN': 20
-                  };
-                  if (property in dmDaysMap) {
-                      daysToAdd = dmDaysMap[property];
-                  }
-              }
+              const offsets = settings?.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS;
+              const daysToAdd = offsets[property] !== undefined ? offsets[property] : 15;
               const d = new Date(parsed);
               d.setDate(d.getDate() + daysToAdd);
               bufferDelivery = getLocalDateString(d).replace(/-/g, '/');

@@ -56,7 +56,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { cn, sortTeams, DEFAULT_TEAM_ORDER, DEFAULT_TEAM_CATEGORIES, DEFAULT_TEAM_ORDER_VERSION, roundPrecise, getLocalDateString } from './utils';
+import { cn, sortTeams, DEFAULT_TEAM_ORDER, DEFAULT_TEAM_CATEGORIES, DEFAULT_TEAM_ORDER_VERSION, roundPrecise, getLocalDateString, DEFAULT_BUFFER_DELIVERY_OFFSETS, parseLocalDate, parseExcelDate } from './utils';
 import { useCapacityAnalysis } from './hooks/useCapacityAnalysis';
 import CapacityAnalysis from './components/CapacityAnalysis';
 import ProductionOutputReport from './components/ProductionOutputReport';
@@ -111,7 +111,8 @@ export default function App() {
           : DEFAULT_TEAM_CATEGORIES,
         teamOrderVersion: DEFAULT_TEAM_ORDER_VERSION,
         defaultCycleDays: parsed.defaultCycleDays ?? 2,
-        aggregationLogic: parsed.aggregationLogic || 'startDate'
+        aggregationLogic: parsed.aggregationLogic || 'startDate',
+        bufferDeliveryOffsets: { ...DEFAULT_BUFFER_DELIVERY_OFFSETS, ...(parsed.bufferDeliveryOffsets || {}) }
       };
     } catch {
       return {
@@ -123,7 +124,8 @@ export default function App() {
         teamCategories: DEFAULT_TEAM_CATEGORIES,
         teamOrderVersion: DEFAULT_TEAM_ORDER_VERSION,
         defaultCycleDays: 2,
-        aggregationLogic: 'startDate'
+        aggregationLogic: 'startDate',
+        bufferDeliveryOffsets: { ...DEFAULT_BUFFER_DELIVERY_OFFSETS }
       };
     }
   });
@@ -455,6 +457,84 @@ export default function App() {
       console.warn('Failed to save to localStorage, possibly due to quota limits:', e);
     }
   }, [resources, standardTimes, processCycles, targetWorkingHours, settings, dashboardFilters]);
+
+  // Reactive recalculation of unissued materials when bufferDeliveryOffsets changes
+  useEffect(() => {
+    if (unissuedMaterials.length === 0) return;
+    
+    let changed = false;
+    const updated = unissuedMaterials.map(item => {
+      const row = item.raw;
+      if (!row) return item;
+      
+      const property = item.property;
+      
+      // Transit delivery calculation
+      let transitDelivery = row['库存分配'] || '';
+      let hasTransitDate = false;
+      const dateMatch = transitDelivery.match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/g);
+      if (dateMatch) {
+          transitDelivery = dateMatch.map((d: string) => d.replace(/-/g, '/')).sort((a: string, b: string) => new Date(b).getTime() - new Date(a).getTime())[0];
+          hasTransitDate = true;
+      }
+      
+      // Buffer delivery calculation based on dynamic settings
+      let bufferDelivery = '';
+      if (transitDelivery && (hasTransitDate || /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(transitDelivery))) {
+          const cleanDateStr = transitDelivery.replace(/\//g, '-');
+          const parsed = parseLocalDate(cleanDateStr);
+          if (parsed && !isNaN(parsed.getTime())) {
+              const offsets = settings.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS;
+              const daysToAdd = offsets[property] !== undefined ? offsets[property] : 15;
+              
+              const d = new Date(parsed);
+              d.setDate(d.getDate() + daysToAdd);
+              bufferDelivery = getLocalDateString(d).replace(/-/g, '/');
+          }
+      }
+      
+      // Satisfaction status evaluation
+      let satisfactionStatus = '';
+      if (!row['库存分配'] || row['库存分配'].toString().trim() === '') {
+          satisfactionStatus = '其他';
+      } else if (['满足', '待进料检验'].includes(row['库存分配'])) {
+          satisfactionStatus = '满足';
+      } else if (row['库存分配'] === '待申购') {
+          satisfactionStatus = '待申购';
+      } else if (bufferDelivery && row['需求日期']) {
+          const reqDateStr = parseExcelDate(row['需求日期']);
+          const buffDateStr = bufferDelivery.replace(/\//g, '-');
+          
+          if (buffDateStr && reqDateStr) {
+              satisfactionStatus = buffDateStr <= reqDateStr ? '在途交期满足' : '在途交期不满足';
+          }
+      }
+      
+      // Shortage quantity
+      const unissuedQtyTotal = parseFloat(row['未发料数量']) || 0;
+      let shortageQty = 0;
+      if (satisfactionStatus === '满足') {
+          shortageQty = 0;
+      } else {
+          shortageQty = unissuedQtyTotal;
+      }
+      
+      if (item.bufferDelivery !== bufferDelivery || item.satisfactionStatus !== satisfactionStatus || item.shortageQty !== shortageQty) {
+          changed = true;
+          return {
+            ...item,
+            bufferDelivery,
+            satisfactionStatus,
+            shortageQty
+          };
+      }
+      return item;
+    });
+    
+    if (changed) {
+      setUnissuedMaterials(updated);
+    }
+  }, [settings.bufferDeliveryOffsets, unissuedMaterials]);
 
   // Real capacity analysis calculation logic
   const analysisResult = useCapacityAnalysis(demands, resources, standardTimes, settings, processCycles, excludeAbnormalOrders);
@@ -1004,6 +1084,7 @@ export default function App() {
         return (
           <UnissuedMaterials
             persistedData={unissuedMaterials}
+            settings={settings}
             onDataChange={(newData) => {
               setUnissuedMaterials(newData);
               if (newData && newData.length > 0) {
@@ -2124,6 +2205,100 @@ export default function App() {
                 </div>
 
                 {/* 数据与安全已移除 */}
+              </div>
+
+              {/* 缓冲交期配置 */}
+              <div className="glass-card p-6 lg:col-span-2">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shadow-sm">
+                      <PackageSearch size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900">缓冲交期偏移配置</h3>
+                      <p className="text-xs text-slate-500">自定义未发料模块中不同物料属性在在途交期基础上的顺延天数</p>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={() => {
+                      if (tempSettings) {
+                        setTempSettings({
+                          ...tempSettings,
+                          bufferDeliveryOffsets: { ...DEFAULT_BUFFER_DELIVERY_OFFSETS }
+                        });
+                      }
+                    }}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors flex items-center gap-1 animate-pulse-subtle"
+                  >
+                    <RotateCcw size={12} />
+                    恢复默认缓冲期
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {/* 基础物料属性 */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">基础物料分类偏移（天）</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      {['化学品', '五金件', '钣金原材料', '机加原材料'].map((prop) => {
+                        const val = tempSettings.bufferDeliveryOffsets?.[prop] ?? DEFAULT_BUFFER_DELIVERY_OFFSETS[prop] ?? 0;
+                        return (
+                          <div key={prop} className="bg-slate-50/50 p-3 rounded-xl border border-slate-100 flex flex-col gap-1.5">
+                            <span className="text-xs font-bold text-slate-700">{prop}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={val}
+                              onChange={(e) => {
+                                const num = parseInt(e.target.value) || 0;
+                                const offsets = { ...(tempSettings.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS) };
+                                offsets[prop] = num;
+                                setTempSettings({ ...tempSettings, bufferDeliveryOffsets: offsets });
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-slate-800"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* DM级别物料属性 */}
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">DM 系列专有属性偏移（天）</h4>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                      {['ASY', 'DTL', 'AGS', 'POL', 'ALU', 'SST', 'CPP', 'NYL', 'FMT', 'HSS', 'MFC', 'MFN'].map((prop) => {
+                        const val = tempSettings.bufferDeliveryOffsets?.[prop] ?? DEFAULT_BUFFER_DELIVERY_OFFSETS[prop] ?? 0;
+                        return (
+                          <div key={prop} className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100 flex flex-col gap-1.5">
+                            <span className="text-xs font-mono font-bold text-slate-600">{prop}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={val}
+                              onChange={(e) => {
+                                const num = parseInt(e.target.value) || 0;
+                                const offsets = { ...(tempSettings.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS) };
+                                offsets[prop] = num;
+                                setTempSettings({ ...tempSettings, bufferDeliveryOffsets: offsets });
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-slate-800"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mt-2 flex items-start gap-1">
+                    <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                    <span>提示：偏移天数会直接改变未发料数据表格中的<strong>“缓冲交期”</strong>计算。
+                保存设置后，系统会自动对当前导入的未发料进行缓冲交期与满足状态的重新评定与统计。</span>
+                  </p>
+                </div>
               </div>
 
             </div>

@@ -7,7 +7,8 @@ import {
   RotateCcw, 
   BarChart3, 
   Check, 
-  Zap 
+  Zap,
+  PackageSearch
 } from 'lucide-react';
 import { cn } from '../utils';
 import { SystemSettings } from '../types';
@@ -15,7 +16,8 @@ import { DraggableTeamList } from './DraggableTeamList';
 import { 
   DEFAULT_TEAM_CATEGORIES, 
   DEFAULT_TEAM_ORDER, 
-  DEFAULT_TEAM_ORDER_VERSION 
+  DEFAULT_TEAM_ORDER_VERSION,
+  DEFAULT_BUFFER_DELIVERY_OFFSETS
 } from '../utils';
 
 interface SettingsPageProps {
@@ -234,6 +236,98 @@ export function SettingsPage({
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* 缓冲交期配置 */}
+        <div className="glass-card p-6 lg:col-span-2">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shadow-sm">
+                <PackageSearch size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900">缓冲交期偏移配置</h3>
+                <p className="text-xs text-slate-500">自定义未发料模块中不同物料属性在在途交期基础上的顺延天数</p>
+              </div>
+            </div>
+            
+            <button 
+              onClick={() => {
+                setTempSettings({
+                  ...tempSettings,
+                  bufferDeliveryOffsets: { ...DEFAULT_BUFFER_DELIVERY_OFFSETS }
+                });
+              }}
+              className="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors flex items-center gap-1"
+            >
+              <RotateCcw size={12} />
+              恢复默认缓冲期
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            {/* 基础物料属性 */}
+            <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">基础物料分类偏移（天）</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {['化学品', '五金件', '钣金原材料', '机加原材料'].map((prop) => {
+                  const val = tempSettings.bufferDeliveryOffsets?.[prop] ?? DEFAULT_BUFFER_DELIVERY_OFFSETS[prop] ?? 0;
+                  return (
+                    <div key={prop} className="bg-slate-50/50 p-3 rounded-xl border border-slate-100 flex flex-col gap-1.5">
+                      <span className="text-xs font-bold text-slate-700">{prop}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={val}
+                        onChange={(e) => {
+                          const num = parseInt(e.target.value) || 0;
+                          const offsets = { ...(tempSettings.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS) };
+                          offsets[prop] = num;
+                          setTempSettings({ ...tempSettings, bufferDeliveryOffsets: offsets });
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-slate-800"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* DM级别物料属性 */}
+            <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">DM 系列专有属性偏移（天）</h4>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                {['ASY', 'DTL', 'AGS', 'POL', 'ALU', 'SST', 'CPP', 'NYL', 'FMT', 'HSS', 'MFC', 'MFN'].map((prop) => {
+                  const val = tempSettings.bufferDeliveryOffsets?.[prop] ?? DEFAULT_BUFFER_DELIVERY_OFFSETS[prop] ?? 0;
+                  return (
+                    <div key={prop} className="bg-slate-50/50 p-2.5 rounded-xl border border-slate-100 flex flex-col gap-1.5">
+                      <span className="text-xs font-mono font-bold text-slate-600">{prop}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={val}
+                        onChange={(e) => {
+                          const num = parseInt(e.target.value) || 0;
+                          const offsets = { ...(tempSettings.bufferDeliveryOffsets || DEFAULT_BUFFER_DELIVERY_OFFSETS) };
+                          offsets[prop] = num;
+                          setTempSettings({ ...tempSettings, bufferDeliveryOffsets: offsets });
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-slate-800"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-2 flex items-start gap-1">
+              <AlertCircle size={12} className="shrink-0 mt-0.5" />
+              <span>提示：偏移天数会直接改变未发料数据表格中的<strong>“缓冲交期”</strong>计算。
+          保存设置后，系统会自动对当前导入的未发料进行缓冲交期与满足状态的重新评定与统计。</span>
+            </p>
           </div>
         </div>
       </div>

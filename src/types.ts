@@ -186,6 +186,7 @@ export interface SystemSettings {
   customHolidays?: string[];
   defaultCycleDays?: number;
   aggregationLogic?: 'startDate' | 'dueDate';
+  bufferDeliveryOffsets?: Record<string, number>;
 }
 
 export interface JobReport {

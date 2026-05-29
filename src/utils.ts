@@ -145,3 +145,22 @@ export function parseExcelDate(val: any): string | null {
   return null;
 }
 
+export const DEFAULT_BUFFER_DELIVERY_OFFSETS: Record<string, number> = {
+  '化学品': 10,
+  '五金件': 5,
+  '钣金原材料': 15,
+  '机加原材料': 15,
+  'ASY': 5,
+  'DTL': 5,
+  'AGS': 10,
+  'POL': 15,
+  'ALU': 20,
+  'SST': 20,
+  'CPP': 20,
+  'NYL': 20,
+  'FMT': 20,
+  'HSS': 20,
+  'MFC': 20,
+  'MFN': 20
+};
+
